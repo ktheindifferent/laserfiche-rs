@@ -1,0 +1,27 @@
+[package]
+name = "laserfiche-rs"
+description = "Integrate your rust project with Laserfiche 11 and Laserfiche Cloud...."
+version = "0.0.6"
+edition = "2021"
+authors = ["Caleb Mitchell Smith <calebsmithwoolrich@gmail.com>"]
+license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/laserfiche-rs"
+repository = "https://github.com/PixelCoda/laserfiche-rs"
+readme = "README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde_json = "1.0"
+trust-dns-resolver = "0.20"
+reqwest = { version = "0.11.9", default-features = false, features = ["blocking", "json", "multipart"] }
+serde_derive = "1.0.130"
+error-chain = "0.12.4"
+tokio = { version = "1.35.0", features = ["full"] }
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[features]
+default = ["reqwest/default-tls", "trust-dns-resolver/dns-over-native-tls"]
