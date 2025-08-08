@@ -4,9 +4,7 @@
 use serde_json::json;
 
 use serde::{Serialize, Deserialize};
-use std::convert::TryInto;
 use std::io::Cursor;
-use serde_json::Map;
 use error_chain::error_chain;
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -249,6 +247,65 @@ pub enum LFObject {
     LFAPIError(LFAPIError),
 }
 
+/// Template information for an entry
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Template {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub field_count: i64,
+}
+
+pub enum TemplateOrError {
+    Template(Template),
+    LFAPIError(LFAPIError),
+}
+
+/// Tags associated with an entry
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Tags {
+    pub value: Vec<Tag>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Tag {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub is_secure: bool,
+    pub watermark_text: Option<String>,
+}
+
+pub enum TagsOrError {
+    Tags(Tags),
+    LFAPIError(LFAPIError),
+}
+
+/// Links associated with an entry
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Links {
+    pub value: Vec<Link>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Link {
+    pub id: i64,
+    pub source_id: i64,
+    pub target_id: i64,
+    pub link_type: String,
+    pub description: Option<String>,
+}
+
+pub enum LinksOrError {
+    Links(Links),
+    LFAPIError(LFAPIError),
+}
+
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(rename_all = "camelCase")]
@@ -449,7 +506,7 @@ impl Entry {
                     return Ok(BitsOrError::LFAPIError(json));
                 }
 
-                let mut file = std::fs::File::create(file_path.clone())?;
+                let mut file = std::fs::File::create(file_path)?;
                 let mut content =  Cursor::new(req.bytes()?);
                 std::io::copy(&mut content, &mut file)?;
 
@@ -650,6 +707,288 @@ impl Entry {
             Err(err) => Err(err.into())
         }
 
+    }
+
+    /// Search for entries using OData query parameters
+    pub fn search(
+        api_server: LFApiServer, 
+        auth: Auth, 
+        search_query: String,
+        order_by: Option<String>,
+        select: Option<String>,
+        skip: Option<i32>,
+        top: Option<i32>
+    ) -> Result<EntriesOrError> {
+        let mut url = format!(
+            "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/Search?q={}",
+            api_server.address, 
+            api_server.repository,
+            urlencoding::encode(&search_query)
+        );
+
+        if let Some(order) = order_by {
+            url.push_str(&format!("&$orderby={}", urlencoding::encode(&order)));
+        }
+        if let Some(sel) = select {
+            url.push_str(&format!("&$select={}", urlencoding::encode(&sel)));
+        }
+        if let Some(s) = skip {
+            url.push_str(&format!("&$skip={}", s));
+        }
+        if let Some(t) = top {
+            url.push_str(&format!("&$top={}", t));
+        }
+
+        let request = reqwest::blocking::Client::new()
+            .get(url)
+            .header("Authorization", format!("Bearer {}", auth.access_token))
+            .send();
+
+        match request {
+            Ok(req) => {
+                if req.status() != reqwest::StatusCode::OK {
+                    let json = req.json::<LFAPIError>()?;
+                    return Ok(EntriesOrError::LFAPIError(json));
+                }
+
+                let json = req.json::<Entries>()?;
+                return Ok(EntriesOrError::Entries(json));
+            },
+            Err(err) => Err(err.into())
+        }
+    }
+
+    /// Copy an entry to a new location
+    pub fn copy(
+        api_server: LFApiServer,
+        auth: Auth,
+        entry_id: i64,
+        target_folder_id: i64,
+        new_name: Option<String>
+    ) -> Result<EntryOrError> {
+        let mut params = json!({
+            "targetId": target_folder_id
+        });
+        
+        if let Some(name) = new_name {
+            params["name"] = json!(name);
+        }
+
+        let request = reqwest::blocking::Client::new()
+            .post(format!(
+                "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/Copy",
+                api_server.address, 
+                api_server.repository, 
+                entry_id
+            ))
+            .header("Authorization", format!("Bearer {}", auth.access_token))
+            .json(&params)
+            .send();
+
+        match request {
+            Ok(req) => {
+                if req.status() != reqwest::StatusCode::CREATED {
+                    let json = req.json::<LFAPIError>()?;
+                    return Ok(EntryOrError::LFAPIError(json));
+                }
+
+                let json = req.json::<Self>()?;
+                return Ok(EntryOrError::Entry(json));
+            },
+            Err(err) => Err(err.into())
+        }
+    }
+
+    /// Get the template associated with an entry
+    pub fn get_template(
+        api_server: LFApiServer,
+        auth: Auth,
+        entry_id: i64
+    ) -> Result<TemplateOrError> {
+        let request = reqwest::blocking::Client::new()
+            .get(format!(
+                "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/template",
+                api_server.address, 
+                api_server.repository, 
+                entry_id
+            ))
+            .header("Authorization", format!("Bearer {}", auth.access_token))
+            .send();
+
+        match request {
+            Ok(req) => {
+                if req.status() != reqwest::StatusCode::OK {
+                    let json = req.json::<LFAPIError>()?;
+                    return Ok(TemplateOrError::LFAPIError(json));
+                }
+
+                let json = req.json::<Template>()?;
+                return Ok(TemplateOrError::Template(json));
+            },
+            Err(err) => Err(err.into())
+        }
+    }
+
+    /// Assign a template to an entry
+    pub fn set_template(
+        api_server: LFApiServer,
+        auth: Auth,
+        entry_id: i64,
+        template_name: String
+    ) -> Result<EntryOrError> {
+        let params = json!({
+            "templateName": template_name
+        });
+
+        let request = reqwest::blocking::Client::new()
+            .put(format!(
+                "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/template",
+                api_server.address, 
+                api_server.repository, 
+                entry_id
+            ))
+            .header("Authorization", format!("Bearer {}", auth.access_token))
+            .json(&params)
+            .send();
+
+        match request {
+            Ok(req) => {
+                if req.status() != reqwest::StatusCode::OK {
+                    let json = req.json::<LFAPIError>()?;
+                    return Ok(EntryOrError::LFAPIError(json));
+                }
+
+                let json = req.json::<Self>()?;
+                return Ok(EntryOrError::Entry(json));
+            },
+            Err(err) => Err(err.into())
+        }
+    }
+
+    /// Remove template from an entry
+    pub fn remove_template(
+        api_server: LFApiServer,
+        auth: Auth,
+        entry_id: i64
+    ) -> Result<EntryOrError> {
+        let request = reqwest::blocking::Client::new()
+            .delete(format!(
+                "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/template",
+                api_server.address, 
+                api_server.repository, 
+                entry_id
+            ))
+            .header("Authorization", format!("Bearer {}", auth.access_token))
+            .send();
+
+        match request {
+            Ok(req) => {
+                if req.status() != reqwest::StatusCode::OK {
+                    let json = req.json::<LFAPIError>()?;
+                    return Ok(EntryOrError::LFAPIError(json));
+                }
+
+                let json = req.json::<Self>()?;
+                return Ok(EntryOrError::Entry(json));
+            },
+            Err(err) => Err(err.into())
+        }
+    }
+
+    /// Get tags assigned to an entry
+    pub fn get_tags(
+        api_server: LFApiServer,
+        auth: Auth,
+        entry_id: i64
+    ) -> Result<TagsOrError> {
+        let request = reqwest::blocking::Client::new()
+            .get(format!(
+                "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/tags",
+                api_server.address, 
+                api_server.repository, 
+                entry_id
+            ))
+            .header("Authorization", format!("Bearer {}", auth.access_token))
+            .send();
+
+        match request {
+            Ok(req) => {
+                if req.status() != reqwest::StatusCode::OK {
+                    let json = req.json::<LFAPIError>()?;
+                    return Ok(TagsOrError::LFAPIError(json));
+                }
+
+                let json = req.json::<Tags>()?;
+                return Ok(TagsOrError::Tags(json));
+            },
+            Err(err) => Err(err.into())
+        }
+    }
+
+    /// Assign tags to an entry
+    pub fn set_tags(
+        api_server: LFApiServer,
+        auth: Auth,
+        entry_id: i64,
+        tag_ids: Vec<i64>
+    ) -> Result<TagsOrError> {
+        let params = json!({
+            "tags": tag_ids
+        });
+
+        let request = reqwest::blocking::Client::new()
+            .put(format!(
+                "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/tags",
+                api_server.address, 
+                api_server.repository, 
+                entry_id
+            ))
+            .header("Authorization", format!("Bearer {}", auth.access_token))
+            .json(&params)
+            .send();
+
+        match request {
+            Ok(req) => {
+                if req.status() != reqwest::StatusCode::OK {
+                    let json = req.json::<LFAPIError>()?;
+                    return Ok(TagsOrError::LFAPIError(json));
+                }
+
+                let json = req.json::<Tags>()?;
+                return Ok(TagsOrError::Tags(json));
+            },
+            Err(err) => Err(err.into())
+        }
+    }
+
+    /// Get links associated with an entry
+    pub fn get_links(
+        api_server: LFApiServer,
+        auth: Auth,
+        entry_id: i64
+    ) -> Result<LinksOrError> {
+        let request = reqwest::blocking::Client::new()
+            .get(format!(
+                "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/links",
+                api_server.address, 
+                api_server.repository, 
+                entry_id
+            ))
+            .header("Authorization", format!("Bearer {}", auth.access_token))
+            .send();
+
+        match request {
+            Ok(req) => {
+                if req.status() != reqwest::StatusCode::OK {
+                    let json = req.json::<LFAPIError>()?;
+                    return Ok(LinksOrError::LFAPIError(json));
+                }
+
+                let json = req.json::<Links>()?;
+                return Ok(LinksOrError::Links(json));
+            },
+            Err(err) => Err(err.into())
+        }
     }
 }
 
