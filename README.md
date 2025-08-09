@@ -2,6 +2,10 @@
 
 A comprehensive Rust client library for the Laserfiche Repository API v1, supporting both Laserfiche Cloud and self-hosted Laserfiche Server installations.
 
+[![Crates.io](https://img.shields.io/crates/v/laserfiche-rs.svg)](https://crates.io/crates/laserfiche-rs)
+[![Documentation](https://docs.rs/laserfiche-rs/badge.svg)](https://docs.rs/laserfiche-rs)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 ## Features
 
 - **Full API Coverage**: Comprehensive implementation of Laserfiche Repository API v1 endpoints
@@ -29,22 +33,37 @@ laserfiche-rs = { version = "0.0.6", features = ["blocking"] }
 
 ## Quick Start
 
+### Environment Variables
+
+For security, it's recommended to use environment variables for credentials:
+
+```bash
+export LF_API_ADDRESS="your-server.laserfiche.com"
+export LF_REPOSITORY="your-repository"
+export LF_USERNAME="your-username"
+export LF_PASSWORD="your-password"
+```
+
 ### Authentication
 
 ```rust
 use laserfiche::{LFApiServer, Auth, AuthOrError};
+use std::env;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Load configuration from environment variables
     let api_server = LFApiServer {
-        address: "your-server.laserfiche.com".to_string(),
-        repository: "your-repository".to_string(),
+        address: env::var("LF_API_ADDRESS")
+            .unwrap_or_else(|_| "your-server.laserfiche.com".to_string()),
+        repository: env::var("LF_REPOSITORY")
+            .unwrap_or_else(|_| "your-repository".to_string()),
     };
 
     let auth_result = Auth::new(
         api_server.clone(),
-        "username".to_string(),
-        "password".to_string()
+        env::var("LF_USERNAME")?,
+        env::var("LF_PASSWORD")?
     ).await?;
 
     match auth_result {
@@ -54,6 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         AuthOrError::LFAPIError(error) => {
             eprintln!("Authentication failed: {:?}", error);
+            return Err(format!("Authentication failed: {:?}", error).into());
         }
     }
     
@@ -98,11 +118,11 @@ match entries_result {
 ### Document Operations
 
 ```rust
-// Import a document
+// Import a document - MIME type is automatically detected from file extension
 let import_result = Entry::import(
     api_server.clone(),
     auth.clone(),
-    "/path/to/file.pdf".to_string(),
+    "/path/to/file.pdf".to_string(),  // Supports PDF, PNG, JPG, DOCX, etc.
     "document_name.pdf".to_string(),
     parent_folder_id
 ).await?;
@@ -311,6 +331,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Supported File Types
+
+The library automatically detects MIME types for common file extensions:
+- Documents: PDF, DOC, DOCX, TXT, XML, JSON
+- Images: PNG, JPG/JPEG, GIF, TIFF/TIF
+- Spreadsheets: XLS, XLSX
+- Other formats default to `application/octet-stream`
+
 ## API Methods Reference
 
 ### Authentication
@@ -367,6 +395,26 @@ All API methods return a `Result` type with specific error enums for each operat
 
 Each error enum contains either the successful result or an `LFAPIError` with detailed error information.
 
+### Example Error Handling
+
+```rust
+use laserfiche::{Entry, EntryOrError};
+
+let entry_result = Entry::get(api_server.clone(), auth.clone(), entry_id).await?;
+
+match entry_result {
+    EntryOrError::Entry(entry) => {
+        println!("Entry retrieved: {}", entry.name);
+        // Process the entry
+    },
+    EntryOrError::LFAPIError(error) => {
+        eprintln!("API Error: {:?}", error);
+        // Handle the error appropriately
+        return Err(format!("Failed to get entry: {:?}", error).into());
+    }
+}
+```
+
 ## Configuration
 
 ### Self-Hosted vs Cloud
@@ -387,14 +435,60 @@ let api_server = LFApiServer {
 };
 ```
 
+## Development
+
+### Building from Source
+
+```bash
+git clone https://github.com/PixelCoda/laserfiche-rs.git
+cd laserfiche-rs
+cargo build --release
+```
+
+### Running Tests
+
+```bash
+# Set up environment variables first
+export LF_API_ADDRESS="your-test-server.laserfiche.com"
+export LF_REPOSITORY="test-repository"
+export LF_USERNAME="test-username"
+export LF_PASSWORD="test-password"
+
+# Run tests
+cargo test
+
+# Run example
+cargo run --example basic_usage
+```
+
 ## License
 
-Licensed under GPLv3. See LICENSE file for details.
+Licensed under GPLv3. See [LICENSE](LICENSE.md) file for details.
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+### Guidelines
+
+1. Ensure all tests pass before submitting
+2. Add tests for new functionality
+3. Update documentation as needed
+4. Follow Rust standard formatting (`cargo fmt`)
+5. Ensure no clippy warnings (`cargo clippy`)
+
 ## Support
 
-For issues and questions, please use the GitHub issue tracker.
+For issues and questions, please use the [GitHub issue tracker](https://github.com/PixelCoda/laserfiche-rs/issues).
+
+## Changelog
+
+### v0.0.7 (Upcoming)
+- Improved error handling with better `.unwrap()` safety
+- Automatic MIME type detection for file imports
+- Environment variable support for credentials
+- Code cleanup and documentation improvements
+- Fixed hardcoded values and improved configurability
+
+### v0.0.6
+- Initial stable release with full API coverage
