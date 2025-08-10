@@ -4,7 +4,7 @@
 
 use crate::laserfiche::{
     LFApiServer, LFAPIError, AuthOrError, Auth as AsyncAuth,
-    Fields, Field, FieldValue, EntryOrError, ImportResultOrError,
+    EntryOrError, ImportResultOrError,
     Entry, Entries, EntriesOrError, MetadataResult, MetadataResultOrError,
     ImportResult, BitsOrError, LFObject, DeletedObject
 };
@@ -68,11 +68,36 @@ impl Auth {
         auth.api_server = api_server;
         auth.timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_secs() as i64;
         
         Ok(AuthOrError::Auth(auth))
     }
+}
+
+/// Helper function to detect MIME type based on file extension
+fn detect_mime_type(file_name: &str) -> String {
+    let extension = file_name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_lowercase();
+        
+    match extension.as_str() {
+        "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "tiff" | "tif" => "image/tiff",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "txt" => "text/plain",
+        "xml" => "application/xml",
+        "json" => "application/json",
+        _ => "application/octet-stream"
+    }.to_string()
 }
 
 /// Blocking API methods for Entry operations
@@ -87,14 +112,17 @@ impl Entry {
     ) -> Result<ImportResultOrError> {
         let file_content = std::fs::read(&file_path)?;
         
+        // Detect MIME type from file extension
+        let mime_type = detect_mime_type(&file_name);
+        
         let file_part = reqwest::blocking::multipart::Part::bytes(file_content)
             .file_name(file_name.clone())
-            .mime_str("image/png")
-            .unwrap();
+            .mime_str(&mime_type)
+            .unwrap_or_else(|_| reqwest::blocking::multipart::Part::bytes(vec![]));
 
         let request_part = reqwest::blocking::multipart::Part::text("{}")
             .mime_str("application/json")
-            .unwrap();
+            .unwrap_or_else(|_| reqwest::blocking::multipart::Part::text("{}"));
 
         let form = reqwest::blocking::multipart::Form::new()
             .part("electronicDocument", file_part)

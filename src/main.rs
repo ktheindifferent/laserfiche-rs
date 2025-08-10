@@ -3,49 +3,57 @@
 // Licensed under GPLv3....see LICENSE file.
 
 use laserfiche_rs::laserfiche;
+use std::env;
 
 #[tokio::main]
-async fn main() {
-    // Initialize API configuration
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize API configuration from environment variables
     let api_server = laserfiche::LFApiServer {
-        address: "<HOST_ADDRESS>".to_string(),
-        repository: "<repo>".to_string(),
+        address: env::var("LF_API_ADDRESS")
+            .unwrap_or_else(|_| "your-server.laserfiche.com".to_string()),
+        repository: env::var("LF_REPOSITORY")
+            .unwrap_or_else(|_| "your-repository".to_string()),
     };
     
-    // Authenticate with the API
+    // Authenticate with the API using environment variables
+    let username = env::var("LF_USERNAME")
+        .unwrap_or_else(|_| "username".to_string());
+    let password = env::var("LF_PASSWORD")
+        .unwrap_or_else(|_| "password".to_string());
+        
     let auth_result = laserfiche::Auth::new(
         api_server.clone(),
-        "<repo>".to_string(),
-        "<password>".to_string()
-    ).await.unwrap();
+        username,
+        password
+    ).await?;
 
     // Handle authentication result
-    let auth = match auth_result {
+    let _auth = match auth_result {
         laserfiche::AuthOrError::Auth(auth) => {
-            println!("Authentication successful: {:?}", auth);
+            println!("Authentication successful!");
             auth
         },
         laserfiche::AuthOrError::LFAPIError(error) => {
             eprintln!("Authentication failed: {:?}", error);
-            return;
+            return Err(format!("Authentication failed: {:?}", error).into());
         }
     };
 
-    // Test token refresh
-    test_token_refresh(&auth).await;
-
-    // Test file import
-    test_file_import(&api_server, &auth).await;
+    // Run example tests (uncomment as needed)
+    // test_token_refresh(&auth).await?;
+    // test_file_import(&api_server, &auth).await?;
+    // test_list_entries(&api_server, &auth).await?;
+    // test_export_file(&api_server, &auth).await?;
     
-    // Uncommented examples for reference:
-    // test_list_entries(&api_server, &auth).await;
-    // test_export_file(&api_server, &auth).await;
+    println!("\nAll tests completed successfully!");
+    Ok(())
 }
 
-async fn test_token_refresh(auth: &laserfiche::Auth) {
+#[allow(dead_code)]
+async fn test_token_refresh(auth: &laserfiche::Auth) -> Result<(), Box<dyn std::error::Error>> {
     println!("\nTesting token refresh...");
     
-    let refresh_result = auth.refresh().await.unwrap();
+    let refresh_result = auth.refresh().await?;
     
     match refresh_result {
         laserfiche::AuthOrError::Auth(refreshed_auth) => {
@@ -53,11 +61,14 @@ async fn test_token_refresh(auth: &laserfiche::Auth) {
         },
         laserfiche::AuthOrError::LFAPIError(error) => {
             eprintln!("Token refresh failed: {:?}", error);
+            return Err(format!("Token refresh failed: {:?}", error).into());
         }
     }
+    Ok(())
 }
 
-async fn test_file_import(api_server: &laserfiche::LFApiServer, auth: &laserfiche::Auth) {
+#[allow(dead_code)]
+async fn test_file_import(api_server: &laserfiche::LFApiServer, auth: &laserfiche::Auth) -> Result<(), Box<dyn std::error::Error>> {
     println!("\nTesting file import...");
     
     let import_result = laserfiche::Entry::import(
@@ -66,7 +77,7 @@ async fn test_file_import(api_server: &laserfiche::LFApiServer, auth: &laserfich
         "incoming".to_string(),
         "test2.tiff".to_string(),
         1  // Parent folder ID
-    ).await.unwrap();
+    ).await?;
     
     match import_result {
         laserfiche::ImportResultOrError::ImportResult(result) => {
@@ -74,19 +85,21 @@ async fn test_file_import(api_server: &laserfiche::LFApiServer, auth: &laserfich
         },
         laserfiche::ImportResultOrError::LFAPIError(error) => {
             eprintln!("File import failed: {:?}", error);
+            return Err(format!("File import failed: {:?}", error).into());
         }
     }
+    Ok(())
 }
 
 #[allow(dead_code)]
-async fn test_list_entries(api_server: &laserfiche::LFApiServer, auth: &laserfiche::Auth) {
+async fn test_list_entries(api_server: &laserfiche::LFApiServer, auth: &laserfiche::Auth) -> Result<(), Box<dyn std::error::Error>> {
     println!("\nListing entries...");
     
     let entries_result = laserfiche::Entry::list(
         api_server.clone(),
         auth.clone(),
         1  // Folder ID
-    ).await.unwrap();
+    ).await?;
     
     match entries_result {
         laserfiche::EntriesOrError::Entries(entries) => {
@@ -94,25 +107,29 @@ async fn test_list_entries(api_server: &laserfiche::LFApiServer, auth: &laserfic
             
             // Get metadata for each entry
             for entry in entries.value {
-                get_entry_metadata(api_server, auth, entry.id).await;
+                if let Err(e) = get_entry_metadata(api_server, auth, entry.id).await {
+                    eprintln!("Failed to get metadata for entry {}: {}", entry.id, e);
+                }
             }
         },
         laserfiche::EntriesOrError::LFAPIError(error) => {
             eprintln!("Failed to list entries: {:?}", error);
+            return Err(format!("Failed to list entries: {:?}", error).into());
         }
     }
+    Ok(())
 }
 
 async fn get_entry_metadata(
     api_server: &laserfiche::LFApiServer,
     auth: &laserfiche::Auth,
     entry_id: i64
-) {
+) -> Result<(), Box<dyn std::error::Error>> {
     let metadata_result = laserfiche::Entry::get_metadata(
         api_server.clone(),
         auth.clone(),
         entry_id
-    ).await.unwrap();
+    ).await?;
     
     match metadata_result {
         laserfiche::MetadataResultOrError::Metadata(metadata) => {
@@ -128,12 +145,14 @@ async fn get_entry_metadata(
         },
         laserfiche::MetadataResultOrError::LFAPIError(error) => {
             eprintln!("Failed to get metadata for entry {}: {:?}", entry_id, error);
+            return Err(format!("Failed to get metadata for entry {}: {:?}", entry_id, error).into());
         }
     }
+    Ok(())
 }
 
 #[allow(dead_code)]
-async fn test_export_file(api_server: &laserfiche::LFApiServer, auth: &laserfiche::Auth) {
+async fn test_export_file(api_server: &laserfiche::LFApiServer, auth: &laserfiche::Auth) -> Result<(), Box<dyn std::error::Error>> {
     println!("\nExporting file...");
     
     let export_result = laserfiche::Entry::export(
@@ -141,7 +160,7 @@ async fn test_export_file(api_server: &laserfiche::LFApiServer, auth: &laserfich
         auth.clone(),
         3740,  // Entry ID to export
         "export_test.png"
-    ).await.unwrap();
+    ).await?;
     
     match export_result {
         laserfiche::BitsOrError::Bits(data) => {
@@ -149,6 +168,8 @@ async fn test_export_file(api_server: &laserfiche::LFApiServer, auth: &laserfich
         },
         laserfiche::BitsOrError::LFAPIError(error) => {
             eprintln!("Export failed: {:?}", error);
+            return Err(format!("Export failed: {:?}", error).into());
         }
     }
+    Ok(())
 }
