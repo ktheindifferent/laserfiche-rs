@@ -126,11 +126,17 @@ While some cloning remains for API simplicity, critical paths have been optimize
 
 ## Testing Strategy
 
-The main.rs file includes comprehensive test functions for:
+The main.rs file includes example test functions for:
 - Authentication and token refresh
 - File import/export operations
 - Entry listing and metadata retrieval
 - Error handling scenarios
+
+**Current State**: No formal unit tests exist yet. The project needs a comprehensive test suite with:
+- Unit tests for all public API methods
+- Integration tests with mock server
+- Property-based testing for input validation
+- Error scenario coverage
 
 ## Future Enhancements
 

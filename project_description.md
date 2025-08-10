@@ -35,6 +35,13 @@ The codebase is organized into:
 - Updated documentation with better examples
 - Fixed compilation warnings and added proper error propagation
 
+## Current Development Status
+- Project structure established with clear separation of async/blocking APIs
+- Core functionality implemented and tested manually
+- Documentation maintained in project_description.md, overview.md, and todo.md
+- No unit tests currently exist - testing framework needs to be implemented
+- Main.rs contains example test functions but no formal test suite
+
 ## Usage
 The library can be used in both async and blocking contexts, making it suitable for various Rust application architectures. Configuration is handled through environment variables for security, with fallback defaults for development.
 

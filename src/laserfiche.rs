@@ -434,7 +434,10 @@ impl Entry {
             "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             "xls" => "application/vnd.ms-excel",
             "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "ppt" => "application/vnd.ms-powerpoint",
+            "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             "txt" => "text/plain",
+            "csv" => "text/csv",
             "xml" => "application/xml",
             "json" => "application/json",
             _ => "application/octet-stream"
@@ -1232,4 +1235,291 @@ pub struct MetadataResultValue {
 pub struct MetadataResultFieldValue {
     pub value: Option<String>,
     pub position: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mock_api_server() -> LFApiServer {
+        LFApiServer {
+            address: "test.laserfiche.com".to_string(),
+            repository: "test-repo".to_string(),
+        }
+    }
+
+    fn mock_auth() -> Auth {
+        Auth {
+            odata_context: "test-context".to_string(),
+            access_token: "test-token-12345".to_string(),
+            expires_in: 3600,
+            token_type: "Bearer".to_string(),
+            username: "test-user".to_string(),
+            password: "test-pass".to_string(),
+            api_server: mock_api_server(),
+            timestamp: 1234567890,
+        }
+    }
+
+    #[test]
+    fn test_lfapiserver_creation() {
+        let server = LFApiServer {
+            address: "example.laserfiche.com".to_string(),
+            repository: "my-repo".to_string(),
+        };
+        assert_eq!(server.address, "example.laserfiche.com");
+        assert_eq!(server.repository, "my-repo");
+    }
+
+    #[test]
+    fn test_auth_struct_fields() {
+        let auth = mock_auth();
+        assert_eq!(auth.token_type, "Bearer");
+        assert_eq!(auth.access_token, "test-token-12345");
+        assert_eq!(auth.timestamp, 1234567890);
+        assert_eq!(auth.username, "test-user");
+        assert_eq!(auth.password, "test-pass");
+        assert_eq!(auth.expires_in, 3600);
+    }
+
+    #[test]
+    fn test_detect_mime_type() {
+        assert_eq!(Entry::detect_mime_type("test.pdf"), "application/pdf");
+        assert_eq!(Entry::detect_mime_type("test.jpg"), "image/jpeg");
+        assert_eq!(Entry::detect_mime_type("test.jpeg"), "image/jpeg");
+        assert_eq!(Entry::detect_mime_type("test.png"), "image/png");
+        assert_eq!(Entry::detect_mime_type("test.gif"), "image/gif");
+        assert_eq!(Entry::detect_mime_type("test.tif"), "image/tiff");
+        assert_eq!(Entry::detect_mime_type("test.tiff"), "image/tiff");
+        assert_eq!(Entry::detect_mime_type("test.txt"), "text/plain");
+        assert_eq!(Entry::detect_mime_type("test.csv"), "text/csv");
+        assert_eq!(Entry::detect_mime_type("test.xml"), "application/xml");
+        assert_eq!(Entry::detect_mime_type("test.json"), "application/json");
+        assert_eq!(Entry::detect_mime_type("test.doc"), "application/msword");
+        assert_eq!(Entry::detect_mime_type("test.docx"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        assert_eq!(Entry::detect_mime_type("test.xls"), "application/vnd.ms-excel");
+        assert_eq!(Entry::detect_mime_type("test.xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        assert_eq!(Entry::detect_mime_type("test.ppt"), "application/vnd.ms-powerpoint");
+        assert_eq!(Entry::detect_mime_type("test.pptx"), "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        assert_eq!(Entry::detect_mime_type("test.unknown"), "application/octet-stream");
+        assert_eq!(Entry::detect_mime_type("test"), "application/octet-stream");
+    }
+
+    #[test]
+    fn test_detect_mime_type_case_insensitive() {
+        assert_eq!(Entry::detect_mime_type("TEST.PDF"), "application/pdf");
+        assert_eq!(Entry::detect_mime_type("Test.Pdf"), "application/pdf");
+        assert_eq!(Entry::detect_mime_type("test.PDF"), "application/pdf");
+    }
+
+    #[test]
+    fn test_entry_struct() {
+        let entry = Entry {
+            id: 123,
+            name: "test-document.pdf".to_string(),
+            parent_id: 1,
+            full_path: "/root/test-document.pdf".to_string(),
+            folder_path: "/root".to_string(),
+            creator: "john.doe".to_string(),
+            creation_time: "2024-01-01T00:00:00Z".to_string(),
+            last_modified_time: "2024-01-02T00:00:00Z".to_string(),
+            entry_type: "Document".to_string(),
+            is_container: false,
+            is_leaf: true,
+            volume_name: "Volume1".to_string(),
+            row_number: 1,
+            ..Default::default()
+        };
+
+        assert_eq!(entry.id, 123);
+        assert_eq!(entry.name, "test-document.pdf");
+        assert_eq!(entry.parent_id, 1);
+        assert!(!entry.is_container);
+        assert!(entry.is_leaf);
+    }
+
+    #[test]
+    fn test_entries_collection() {
+        let entry1 = Entry {
+            id: 1,
+            name: "doc1.pdf".to_string(),
+            ..Default::default()
+        };
+        
+        let entry2 = Entry {
+            id: 2,
+            name: "doc2.pdf".to_string(),
+            ..Default::default()
+        };
+
+        let entries = Entries {
+            value: vec![entry1, entry2],
+            odata_next_link: Some("https://api.laserfiche.com/next".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(entries.value.len(), 2);
+        assert_eq!(entries.value[0].id, 1);
+        assert_eq!(entries.value[1].id, 2);
+        assert!(entries.odata_next_link.is_some());
+    }
+
+    #[test]
+    fn test_patched_entry_struct() {
+        // Test PatchedEntry instead of non-existent DeleteParameters
+        let patched = PatchedEntry {
+            parent_id: Some(10),
+            name: Some("renamed-document.pdf".to_string()),
+        };
+
+        assert_eq!(patched.parent_id, Some(10));
+        assert_eq!(patched.name, Some("renamed-document.pdf".to_string()));
+    }
+
+    #[test]
+    fn test_patched_entry_serialization() {
+        let patched = PatchedEntry {
+            parent_id: Some(10),
+            name: Some("renamed-document.pdf".to_string()),
+        };
+
+        let json = serde_json::to_string(&patched).unwrap();
+        assert!(json.contains("\"parentId\":10"));
+        assert!(json.contains("\"name\":\"renamed-document.pdf\""));
+    }
+
+    #[test]
+    fn test_metadata_value() {
+        let metadata = MetadataValue {
+            value: "test-value".to_string(),
+            position: 1,
+        };
+
+        assert_eq!(metadata.value, "test-value");
+        assert_eq!(metadata.position, 1);
+    }
+
+    #[test]
+    fn test_import_result() {
+        let import_result = ImportResult {
+            operations: Operations {
+                entry_create: EntryCreate {
+                    entry_id: 123,
+                    exceptions: vec![],
+                },
+                set_edoc: SetEdoc {
+                    exceptions: vec![],
+                },
+                set_template: None,
+                set_fields: None,
+                set_tags: None,
+            },
+            document_link: "https://api.laserfiche.com/entries/123".to_string(),
+        };
+
+        assert_eq!(import_result.operations.entry_create.entry_id, 123);
+        assert!(import_result.operations.entry_create.exceptions.is_empty());
+        assert_eq!(import_result.document_link, "https://api.laserfiche.com/entries/123");
+    }
+
+    #[test]
+    fn test_lfapi_error() {
+        let error = LFAPIError {
+            type_field: Some("NotFoundError".to_string()),
+            title: Some("Not Found".to_string()),
+            status: Some(404),
+            detail: Some("The requested entry does not exist".to_string()),
+            instance: Some("/api/entries/999".to_string()),
+            operation_id: Some("op-123".to_string()),
+            error_source: Some("Repository".to_string()),
+            error_code: Some(1001),
+            trace_id: Some("trace-123".to_string()),
+            additional_prop1: None,
+            additional_prop2: None,
+            additional_prop3: None,
+        };
+
+        assert_eq!(error.status, Some(404));
+        assert_eq!(error.title, Some("Not Found".to_string()));
+        assert_eq!(error.error_code, Some(1001));
+    }
+
+    #[test]
+    fn test_auth_or_error_enum() {
+        let auth = mock_auth();
+        let auth_result = AuthOrError::Auth(auth.clone());
+        
+        match auth_result {
+            AuthOrError::Auth(a) => assert_eq!(a.access_token, "test-token-12345"),
+            AuthOrError::LFAPIError(_) => panic!("Expected Auth variant"),
+        }
+
+        let error = LFAPIError {
+            status: Some(401),
+            title: Some("Unauthorized".to_string()),
+            ..Default::default()
+        };
+        let error_result = AuthOrError::LFAPIError(error);
+        
+        match error_result {
+            AuthOrError::Auth(_) => panic!("Expected LFAPIError variant"),
+            AuthOrError::LFAPIError(e) => assert_eq!(e.status, Some(401)),
+        }
+    }
+
+    #[test]
+    fn test_entry_or_error_enum() {
+        let entry = Entry {
+            id: 123,
+            name: "test.pdf".to_string(),
+            ..Default::default()
+        };
+        let entry_result = EntryOrError::Entry(entry);
+        
+        match entry_result {
+            EntryOrError::Entry(e) => assert_eq!(e.id, 123),
+            EntryOrError::LFAPIError(_) => panic!("Expected Entry variant"),
+        }
+    }
+
+    #[test]
+    fn test_entries_or_error_enum() {
+        let entries = Entries {
+            value: vec![],
+            ..Default::default()
+        };
+        let entries_result = EntriesOrError::Entries(entries);
+        
+        match entries_result {
+            EntriesOrError::Entries(e) => assert_eq!(e.value.len(), 0),
+            EntriesOrError::LFAPIError(_) => panic!("Expected Entries variant"),
+        }
+    }
+
+    #[test]
+    fn test_import_result_or_error_enum() {
+        let import = ImportResult {
+            operations: Operations {
+                entry_create: EntryCreate {
+                    entry_id: 456,
+                    exceptions: vec![],
+                },
+                set_edoc: SetEdoc {
+                    exceptions: vec![],
+                },
+                set_template: None,
+                set_fields: None,
+                set_tags: None,
+            },
+            document_link: "https://test.com/456".to_string(),
+        };
+        let import_result = ImportResultOrError::ImportResult(import);
+        
+        match import_result {
+            ImportResultOrError::ImportResult(i) => {
+                assert_eq!(i.operations.entry_create.entry_id, 456)
+            },
+            ImportResultOrError::LFAPIError(_) => panic!("Expected ImportResult variant"),
+        }
+    }
 }
