@@ -10,9 +10,12 @@
 - [x] Fix compilation warnings
 - [x] Update README with better examples and environment variable documentation
 - [x] Create project documentation files (project_description.md, overview.md, todo.md)
+- [x] Add comprehensive unit tests (15 tests) for core structs and functions
+- [x] Add integration tests for authentication and API operations
+- [x] Fix MIME type detection to include CSV, PPT, and PPTX formats
 
 ## High Priority Tasks 🔴
-- [ ] Add comprehensive unit tests for all public APIs
+- [ ] Add more comprehensive unit tests for all remaining public APIs
 - [ ] Implement retry logic with exponential backoff for network failures
 - [ ] Add connection pooling for better performance
 - [ ] Create integration tests with mock Laserfiche server
@@ -45,6 +48,7 @@
 - [ ] Reduce remaining `.clone()` calls where possible
 - [ ] Extract magic numbers into named constants
 - [ ] Add derive macros for common trait implementations
+- [ ] Consider using ApiHelper::execute_request to reduce code duplication in API calls
 
 ## Documentation Tasks 📚
 - [ ] Add inline code examples for all public methods
@@ -99,6 +103,16 @@
 - [ ] Write blog post about the library
 - [ ] Present at Rust meetups
 
+## Recently Discovered Tasks 🆕
+- [ ] Fix test warning about useless comparison (entries.value.len() >= 0)
+- [ ] Update error-chain crate to fix cfg warnings
+- [ ] Add tests for blocking API methods
+- [ ] Add tests for template, tag, and link management methods
+- [ ] Add tests for metadata operations
+- [ ] Add tests for copy and patch operations
+- [ ] Implement error recovery and retry mechanisms
+- [ ] Add comprehensive logging throughout the codebase
+
 ---
-*Last Updated: Project cleanup and documentation phase completed*
-*Next Focus: Testing and code quality improvements*
+*Last Updated: Testing phase partially completed - 15 unit tests added*
+*Next Focus: Complete test coverage and implement retry logic*
