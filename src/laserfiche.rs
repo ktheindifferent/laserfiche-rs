@@ -10,6 +10,7 @@ use serde::{Serialize, Deserialize};
 use std::io::Cursor;
 use error_chain::error_chain;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::convert::TryInto;
 
 error_chain! {
     foreign_links {
@@ -131,7 +132,9 @@ impl Auth {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_else(|_| std::time::Duration::from_secs(0))
-            .as_secs() as i64
+            .as_secs()
+            .try_into()
+            .unwrap_or(i64::MAX)
     }
 }
 
@@ -1593,5 +1596,119 @@ mod tests {
             },
             ImportResultOrError::LFAPIError(_) => panic!("Expected ImportResult variant"),
         }
+    }
+
+    #[test]
+    fn test_timestamp_year_2038_boundary() {
+        // Year 2038 problem occurs at 2^31 - 1 seconds (January 19, 2038 03:14:07 UTC)
+        let year_2038_timestamp: u64 = 2_147_483_647;
+        let result: std::result::Result<i64, _> = year_2038_timestamp.try_into();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 2_147_483_647);
+        
+        // One second after the 2038 boundary (still within i64 range)
+        let after_2038: u64 = 2_147_483_648;
+        let result: std::result::Result<i64, _> = after_2038.try_into();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 2_147_483_648);
+    }
+
+    #[test]
+    fn test_timestamp_max_i64_value() {
+        // Test at exactly i64::MAX
+        let max_i64_as_u64: u64 = i64::MAX as u64;
+        let result: std::result::Result<i64, _> = max_i64_as_u64.try_into();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), i64::MAX);
+        
+        // Test overflow scenario - one more than i64::MAX
+        let overflow: u64 = (i64::MAX as u64) + 1;
+        let result: std::result::Result<i64, _> = overflow.try_into();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_timestamp_overflow_handling() {
+        // Test that our implementation handles overflow gracefully
+        let max_u64 = u64::MAX;
+        let result: i64 = max_u64.try_into().unwrap_or(i64::MAX);
+        assert_eq!(result, i64::MAX);
+        
+        // Test with a value that would overflow
+        let overflow_value: u64 = (i64::MAX as u64) + 1000;
+        let result: i64 = overflow_value.try_into().unwrap_or(i64::MAX);
+        assert_eq!(result, i64::MAX);
+    }
+
+    #[test]
+    fn test_current_timestamp_safe_conversion() {
+        // Test that current_timestamp returns a valid i64
+        let timestamp = Auth::current_timestamp();
+        assert!(timestamp > 0);
+        assert!(timestamp <= i64::MAX);
+        
+        // Verify it's approximately the current time (within reasonable bounds)
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        // Check that the timestamp is reasonable (between year 2020 and 2100)
+        let year_2020: i64 = 1577836800; // January 1, 2020
+        let year_2100: i64 = 4102444800; // January 1, 2100
+        assert!(timestamp >= year_2020);
+        assert!(timestamp <= year_2100);
+        
+        // The current timestamp should be close to now
+        assert!((timestamp as u64) <= now_secs + 1);
+    }
+
+    #[test]
+    fn test_future_dates_handling() {
+        // Test with year 2050 timestamp
+        let year_2050: u64 = 2524608000; // January 1, 2050
+        let result: std::result::Result<i64, _> = year_2050.try_into();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 2524608000);
+        
+        // Test with year 2100 timestamp
+        let year_2100: u64 = 4102444800; // January 1, 2100
+        let result: std::result::Result<i64, _> = year_2100.try_into();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 4102444800);
+        
+        // Test with year 2200 timestamp (well within i64 range)
+        let year_2200: u64 = 7258118400; // January 1, 2200
+        let result: std::result::Result<i64, _> = year_2200.try_into();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 7258118400);
+    }
+
+    #[test]
+    fn test_edge_case_zero_timestamp() {
+        // Test Unix epoch (0)
+        let epoch: u64 = 0;
+        let result: std::result::Result<i64, _> = epoch.try_into();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[test]
+    fn test_auth_timestamp_field() {
+        // Create an Auth instance and verify timestamp is set correctly
+        let mut auth = mock_auth();
+        
+        // Set timestamp to a known value
+        auth.timestamp = 1234567890;
+        assert_eq!(auth.timestamp, 1234567890);
+        
+        // Test setting to max value
+        auth.timestamp = i64::MAX;
+        assert_eq!(auth.timestamp, i64::MAX);
+        
+        // Verify current_timestamp is within valid range
+        auth.timestamp = Auth::current_timestamp();
+        assert!(auth.timestamp > 0);
+        assert!(auth.timestamp <= i64::MAX);
     }
 }

@@ -467,6 +467,7 @@ name = "laserfiche-rs"
 version = "0.0.6"
 dependencies = [
  "error-chain",
+ "log",
  "once_cell",
  "regex",
  "reqwest",

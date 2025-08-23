@@ -14,6 +14,7 @@ use serde_json::json;
 use std::io::Cursor;
 use error_chain::error_chain;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::convert::TryInto;
 
 error_chain! {
     foreign_links {
@@ -80,7 +81,9 @@ impl Auth {
         auth.timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_else(|_| std::time::Duration::from_secs(0))
-            .as_secs() as i64;
+            .as_secs()
+            .try_into()
+            .unwrap_or(i64::MAX);
         
         Ok(AuthOrError::Auth(auth))
     }
