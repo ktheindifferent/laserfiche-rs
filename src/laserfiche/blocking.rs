@@ -2,6 +2,7 @@
 // Developed by Caleb Mitchell Smith (PixelCoda)
 // Licensed under GPLv3....see LICENSE file.
 
+use crate::validation;
 use crate::laserfiche::{
     LFApiServer, LFAPIError, AuthOrError, Auth as AsyncAuth,
     EntryOrError, ImportResultOrError,
@@ -19,6 +20,7 @@ error_chain! {
     foreign_links {
         HttpRequest(reqwest::Error);
         IOError(std::io::Error);
+        ValidationError(validation::Error);
     }
 }
 
@@ -41,10 +43,19 @@ impl Auth {
     }
 
     fn authenticate_blocking(api_server: LFApiServer, username: String, password: String) -> Result<AuthOrError> {
+        // Validate server address and repository name
+        let validated_address = validation::validate_server_address(&api_server.address)?;
+        let validated_repository = validation::validate_repository_name(&api_server.repository)?;
+        
+        let validated_server = LFApiServer {
+            address: validated_address.clone(),
+            repository: validated_repository.clone(),
+        };
+        
         let token_url = format!(
             "https://{}/LFRepositoryAPI/v1/Repositories/{}/Token",
-            api_server.address,
-            api_server.repository
+            validated_address,
+            validated_repository
         );
         
         let auth_params = vec![
@@ -66,7 +77,7 @@ impl Auth {
         let mut auth = response.json::<Self>()?;
         auth.username = username;
         auth.password = password;
-        auth.api_server = api_server;
+        auth.api_server = validated_server;
         auth.timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_else(|_| std::time::Duration::from_secs(0))
@@ -113,13 +124,21 @@ impl Entry {
         file_name: String,
         root_id: i64
     ) -> Result<ImportResultOrError> {
-        let file_content = std::fs::read(&file_path)?;
+        // Validate inputs
+        let validated_path = validation::validate_file_path(&file_path)?;
+        let validated_name = validation::validate_file_name(&file_name)?;
+        let validated_root_id = validation::validate_entry_id(root_id)?;
+        
+        let file_content = std::fs::read(&validated_path)?;
+        
+        // Validate file size
+        validation::validate_file_size(file_content.len() as u64)?;
         
         // Detect MIME type from file extension
-        let mime_type = detect_mime_type(&file_name);
+        let mime_type = detect_mime_type(&validated_name);
         
         let file_part = reqwest::blocking::multipart::Part::bytes(file_content)
-            .file_name(file_name.clone())
+            .file_name(validated_name.clone())
             .mime_str(&mime_type)
             .unwrap_or_else(|_| reqwest::blocking::multipart::Part::bytes(vec![]));
 
@@ -135,8 +154,8 @@ impl Entry {
             "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/{}?autoRename=true",
             api_server.address,
             api_server.repository,
-            root_id,
-            file_name
+            validated_root_id,
+            validated_name
         );
 
         let response = reqwest::blocking::Client::new()
@@ -215,11 +234,15 @@ impl Entry {
         entry_id: i64,
         file_path: &str
     ) -> Result<BitsOrError> {
+        // Validate inputs
+        let validated_id = validation::validate_entry_id(entry_id)?;
+        let validated_path = validation::validate_file_path(file_path)?;
+        
         let url = format!(
             "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/Laserfiche.Repository.Document/edoc",
             api_server.address,
             api_server.repository,
-            entry_id
+            validated_id
         );
         
         let response = reqwest::blocking::Client::new()
@@ -233,7 +256,7 @@ impl Entry {
         }
 
         let bytes = response.bytes()?;
-        let mut file = std::fs::File::create(file_path)?;
+        let mut file = std::fs::File::create(&validated_path)?;
         let mut cursor = Cursor::new(&bytes);
         std::io::copy(&mut cursor, &mut file)?;
         
@@ -246,11 +269,14 @@ impl Entry {
         auth: Auth,
         entry_id: i64
     ) -> Result<MetadataResultOrError> {
+        // Validate entry ID
+        let validated_id = validation::validate_entry_id(entry_id)?;
+        
         let url = format!(
             "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/fields",
             api_server.address,
             api_server.repository,
-            entry_id
+            validated_id
         );
         
         let response = reqwest::blocking::Client::new()
@@ -274,17 +300,21 @@ impl Entry {
         entry_id: i64,
         metadata: serde_json::Value
     ) -> Result<MetadataResultOrError> {
+        // Validate inputs
+        let validated_id = validation::validate_entry_id(entry_id)?;
+        let validated_metadata = validation::validate_metadata_json(&metadata)?;
+        
         let url = format!(
             "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/fields",
             api_server.address,
             api_server.repository,
-            entry_id
+            validated_id
         );
         
         let response = reqwest::blocking::Client::new()
             .put(url)
             .header("Authorization", format!("Bearer {}", auth.access_token))
-            .json(&metadata)
+            .json(&validated_metadata)
             .send()?;
 
         if response.status() != reqwest::StatusCode::OK {
