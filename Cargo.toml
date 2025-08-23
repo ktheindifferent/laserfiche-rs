@@ -19,6 +19,7 @@ serde_derive = "1.0.130"
 error-chain = "0.12.4"
 tokio = { version = "1.35.0", features = ["full"] }
 urlencoding = "2.1"
+log = "0.4"
 
 [dependencies.serde]
 version = "1.0"
