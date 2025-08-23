@@ -2,8 +2,8 @@
 // Developed by Caleb Mitchell Smith (PixelCoda)
 // Licensed under GPLv3....see LICENSE file.
 
-use laserfiche_rs::laserfiche;
-use std::env;
+use laserfiche_rs::{laserfiche, config};
+use std::process;
 use log::debug;
 
 /// Helper trait for safe array access with logging
@@ -37,24 +37,32 @@ impl<T> SafeArrayAccess<T> for Vec<T> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize API configuration from environment variables
-    let api_server = laserfiche::LFApiServer {
-        address: env::var("LF_API_ADDRESS")
-            .unwrap_or_else(|_| "your-server.laserfiche.com".to_string()),
-        repository: env::var("LF_REPOSITORY")
-            .unwrap_or_else(|_| "your-repository".to_string()),
+    // Load configuration from environment variables with proper validation
+    let config = match config::Config::from_env() {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("Configuration error: {}", e);
+            eprintln!("\nPlease set the following environment variables:");
+            eprintln!("  - LF_API_ADDRESS: The Laserfiche API server address");
+            eprintln!("  - LF_REPOSITORY: The repository name");
+            eprintln!("  - LF_USERNAME: Your username");
+            eprintln!("  - LF_PASSWORD: Your password");
+            eprintln!("\nNote: Placeholder values like 'username' or 'your-server' are not allowed.");
+            process::exit(1);
+        }
     };
     
-    // Authenticate with the API using environment variables
-    let username = env::var("LF_USERNAME")
-        .unwrap_or_else(|_| "username".to_string());
-    let password = env::var("LF_PASSWORD")
-        .unwrap_or_else(|_| "password".to_string());
-        
+    // Initialize API configuration from validated environment variables
+    let api_server = laserfiche::LFApiServer {
+        address: config.api_address.clone(),
+        repository: config.repository.clone(),
+    };
+    
+    // Authenticate with the API using validated credentials
     let auth_result = laserfiche::Auth::new(
         api_server.clone(),
-        username,
-        password
+        config.username,
+        config.password
     ).await?;
 
     // Handle authentication result
