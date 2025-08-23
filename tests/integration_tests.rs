@@ -250,3 +250,132 @@ async fn test_search_entries() {
         }
     }
 }
+
+#[tokio::test]
+async fn test_metadata_empty_arrays() {
+    // Test handling of empty metadata arrays
+    let address = env::var("LF_TEST_API_ADDRESS").ok();
+    let repository = env::var("LF_TEST_REPOSITORY").ok();
+    let username = env::var("LF_TEST_USERNAME").ok();
+    let password = env::var("LF_TEST_PASSWORD").ok();
+
+    if address.is_none() || repository.is_none() || username.is_none() || password.is_none() {
+        eprintln!("Skipping integration test: Missing test environment variables");
+        return;
+    }
+
+    let api_server = LFApiServer {
+        address: address.unwrap(),
+        repository: repository.unwrap(),
+    };
+
+    let auth_result = Auth::new(
+        api_server.clone(),
+        username.unwrap(),
+        password.unwrap()
+    ).await;
+
+    if let Ok(AuthOrError::Auth(auth)) = auth_result {
+        // Test with a known entry ID that might have metadata
+        let metadata_result = Entry::get_metadata(
+            api_server,
+            auth,
+            1  // Root folder typically exists
+        ).await;
+
+        // Should handle the result gracefully whether metadata exists or not
+        match metadata_result {
+            Ok(MetadataResultOrError::Metadata(metadata)) => {
+                // Should not panic even if metadata.value is empty
+                if metadata.value.is_empty() {
+                    println!("Entry has no metadata (expected case)");
+                } else {
+                    // Should not panic when accessing first element
+                    if let Some(first_field) = metadata.value.first() {
+                        println!("First metadata field: {:?}", first_field.field_name);
+                        
+                        // Should not panic even if values array is empty
+                        if first_field.values.is_empty() {
+                            println!("Field has no values");
+                        } else if let Some(first_value) = first_field.values.first() {
+                            println!("First value: {:?}", first_value.value);
+                        }
+                    }
+                }
+            },
+            Ok(MetadataResultOrError::LFAPIError(_)) => {
+                // API error is acceptable for this test
+                println!("API returned error (may be expected)");
+            },
+            Err(e) => {
+                eprintln!("Failed to get metadata: {}", e);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_metadata_with_various_array_sizes() {
+    // Test handling metadata with different array sizes
+    let address = env::var("LF_TEST_API_ADDRESS").ok();
+    let repository = env::var("LF_TEST_REPOSITORY").ok();
+    let username = env::var("LF_TEST_USERNAME").ok();
+    let password = env::var("LF_TEST_PASSWORD").ok();
+
+    if address.is_none() || repository.is_none() || username.is_none() || password.is_none() {
+        eprintln!("Skipping integration test: Missing test environment variables");
+        return;
+    }
+
+    let api_server = LFApiServer {
+        address: address.unwrap(),
+        repository: repository.unwrap(),
+    };
+
+    let auth_result = Auth::new(
+        api_server.clone(),
+        username.unwrap(),
+        password.unwrap()
+    ).await;
+
+    if let Ok(AuthOrError::Auth(auth)) = auth_result {
+        // First, list some entries to test
+        let entries_result = Entry::list(
+            api_server.clone(),
+            auth.clone(),
+            1
+        ).await;
+
+        if let Ok(EntriesOrError::Entries(entries)) = entries_result {
+            // Test metadata for multiple entries
+            for entry in entries.value.iter().take(5) {
+                let metadata_result = Entry::get_metadata(
+                    api_server.clone(),
+                    auth.clone(),
+                    entry.id
+                ).await;
+
+                match metadata_result {
+                    Ok(MetadataResultOrError::Metadata(metadata)) => {
+                        // Verify safe access without panics
+                        println!("Entry {} has {} metadata fields", entry.id, metadata.value.len());
+                        
+                        // Safe iteration over metadata fields
+                        for (idx, field) in metadata.value.iter().enumerate() {
+                            println!("  Field {}: {} with {} values", 
+                                     idx, 
+                                     field.field_name, 
+                                     field.values.len());
+                        }
+                    },
+                    Ok(MetadataResultOrError::LFAPIError(error)) => {
+                        println!("Entry {} metadata error: {:?}", entry.id, error);
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to get metadata for entry {}: {}", entry.id, e);
+                    }
+                }
+            }
+        }
+    }
+}
