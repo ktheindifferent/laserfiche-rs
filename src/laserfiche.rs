@@ -3,6 +3,7 @@
 // Licensed under GPLv3....see LICENSE file.
 pub mod blocking;
 
+use crate::validation;
 use serde_json::json;
 
 use serde::{Serialize, Deserialize};
@@ -14,6 +15,7 @@ error_chain! {
     foreign_links {
         HttpRequest(reqwest::Error);
         IOError(std::io::Error);
+        ValidationError(validation::Error);
     }
 }
 
@@ -79,7 +81,16 @@ impl Auth {
     }
 
     async fn authenticate(api_server: LFApiServer, username: String, password: String) -> Result<AuthOrError> {
-        let token_url = Self::build_token_url(&api_server);
+        // Validate server address and repository name
+        let validated_address = validation::validate_server_address(&api_server.address)?;
+        let validated_repository = validation::validate_repository_name(&api_server.repository)?;
+        
+        let validated_server = LFApiServer {
+            address: validated_address,
+            repository: validated_repository,
+        };
+        
+        let token_url = Self::build_token_url(&validated_server);
         let auth_params = Self::build_auth_params(&username, &password);
         
         let response = reqwest::Client::new()
@@ -96,7 +107,7 @@ impl Auth {
         let mut auth = response.json::<Self>().await?;
         auth.username = username;
         auth.password = password;
-        auth.api_server = api_server;
+        auth.api_server = validated_server;
         auth.timestamp = Self::current_timestamp();
         
         Ok(AuthOrError::Auth(auth))
@@ -319,11 +330,12 @@ pub struct Entry {
 struct ApiHelper;
 
 impl ApiHelper {
-    fn build_entries_url(api_server: &LFApiServer, entry_id: i64) -> String {
-        format!("https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}",
+    fn build_entries_url(api_server: &LFApiServer, entry_id: i64) -> Result<String> {
+        let validated_id = validation::validate_entry_id(entry_id)?;
+        Ok(format!("https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}",
             api_server.address,
             api_server.repository,
-            entry_id)
+            validated_id))
     }
 
     fn build_base_url(api_server: &LFApiServer) -> String {
@@ -368,9 +380,18 @@ impl Entry {
         file_name: String,
         root_id: i64
     ) -> Result<ImportResultOrError> {
-        let file_content = std::fs::read(&file_path)?;
-        let form = Self::build_import_form(file_content, &file_name);
-        let import_url = Self::build_import_url(&api_server, root_id, &file_name);
+        // Validate inputs
+        let validated_path = validation::validate_file_path(&file_path)?;
+        let validated_name = validation::validate_file_name(&file_name)?;
+        let validated_root_id = validation::validate_entry_id(root_id)?;
+        
+        let file_content = std::fs::read(&validated_path)?;
+        
+        // Validate file size
+        validation::validate_file_size(file_content.len() as u64)?;
+        
+        let form = Self::build_import_form(file_content, &validated_name);
+        let import_url = Self::build_import_url(&api_server, validated_root_id, &validated_name);
         
         let response = reqwest::Client::new()
             .post(import_url)
@@ -508,12 +529,16 @@ impl Entry {
         entry_id: i64,
         metadata: serde_json::Value
     ) -> Result<MetadataResultOrError> {
-        let url = format!("{}/fields", ApiHelper::build_entries_url(&api_server, entry_id));
+        // Validate inputs
+        let validated_id = validation::validate_entry_id(entry_id)?;
+        let validated_metadata = validation::validate_metadata_json(&metadata)?;
+        
+        let url = format!("{}/fields", ApiHelper::build_entries_url(&api_server, validated_id)?);
         
         let response = reqwest::Client::new()
             .put(url)
             .header("Authorization", format!("Bearer {}", auth.access_token))
-            .json(&metadata)
+            .json(&validated_metadata)
             .send()
             .await?;
 
@@ -531,7 +556,10 @@ impl Entry {
         auth: Auth,
         entry_id: i64
     ) -> Result<MetadataResultOrError> {
-        let url = format!("{}/fields", ApiHelper::build_entries_url(&api_server, entry_id));
+        // Validate entry ID
+        let validated_id = validation::validate_entry_id(entry_id)?;
+        
+        let url = format!("{}/fields", ApiHelper::build_entries_url(&api_server, validated_id)?);
         
         let response = reqwest::Client::new()
             .get(url)
@@ -557,10 +585,11 @@ impl Entry {
 
 
     pub async fn edoc_head(api_server: LFApiServer, auth: Auth, root_id: i64) -> Result<EntryOrError> {
-
+        // Validate entry ID
+        let validated_id = validation::validate_entry_id(root_id)?;
 
         let request = reqwest::Client::new()
-        .head(format!("https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/Laserfiche.Repository.Document/edoc", api_server.address, api_server.repository, root_id))
+        .head(format!("https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/Laserfiche.Repository.Document/edoc", api_server.address, api_server.repository, validated_id))
         .header("Authorization", format!("Bearer {}", auth.access_token))
         .send().await;
 
@@ -594,9 +623,13 @@ impl Entry {
         entry_id: i64,
         file_path: &str
     ) -> Result<BitsOrError> {
+        // Validate inputs
+        let validated_id = validation::validate_entry_id(entry_id)?;
+        let validated_path = validation::validate_file_path(file_path)?;
+        
         let url = format!(
             "{}/Laserfiche.Repository.Document/edoc",
-            ApiHelper::build_entries_url(&api_server, entry_id)
+            ApiHelper::build_entries_url(&api_server, validated_id)?
         );
         
         let response = reqwest::Client::new()
@@ -611,7 +644,7 @@ impl Entry {
         }
 
         let bytes = response.bytes().await?;
-        Self::save_to_file(&bytes, file_path)?;
+        Self::save_to_file(&bytes, validated_path.to_str().ok_or("Invalid path")?)?;
         
         Ok(BitsOrError::Bits(bytes.to_vec()))
     }
@@ -634,7 +667,8 @@ impl Entry {
         auth: Auth,
         root_id: i64
     ) -> Result<EntryOrError> {
-        let url = ApiHelper::build_entries_url(&api_server, root_id);
+        let validated_id = validation::validate_entry_id(root_id)?;
+        let url = ApiHelper::build_entries_url(&api_server, validated_id)?;
         
         let response = reqwest::Client::new()
             .get(url)
@@ -647,10 +681,12 @@ impl Entry {
 
 
     pub async fn get_field(api_server: LFApiServer, auth: Auth, root_id: i64, field_id: i64) -> Result<LFObject> {
-
+        // Validate inputs
+        let validated_id = validation::validate_entry_id(root_id)?;
+        let validated_field_id = validation::validate_entry_id(field_id)?;
 
         let request = reqwest::Client::new()
-        .get(format!("https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/fields/{}", api_server.address, api_server.repository, root_id, field_id))
+        .get(format!("https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/fields/{}", api_server.address, api_server.repository, validated_id, validated_field_id))
         .header("Authorization", format!("Bearer {}", auth.access_token))
         .send().await;
 
@@ -672,10 +708,11 @@ impl Entry {
     }
 
     pub async fn get_fields(api_server: LFApiServer, auth: Auth, root_id: i64) -> Result<LFObject> {
-
+        // Validate entry ID
+        let validated_id = validation::validate_entry_id(root_id)?;
 
         let request = reqwest::Client::new()
-        .get(format!("https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/fields", api_server.address, api_server.repository, root_id))
+        .get(format!("https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/fields", api_server.address, api_server.repository, validated_id))
         .header("Authorization", format!("Bearer {}", auth.access_token))
         .send().await;
 
@@ -709,12 +746,15 @@ impl Entry {
         root_id: i64,
         comment: String
     ) -> Result<LFObject> {
+        // Validate entry ID
+        let validated_id = validation::validate_entry_id(root_id)?;
+        
         let params = DestroyEntry {
             audit_reason_id: 0,
             comment,
         };
 
-        let url = ApiHelper::build_entries_url(&api_server, root_id);
+        let url = ApiHelper::build_entries_url(&api_server, validated_id)?;
         
         let response = reqwest::Client::new()
             .delete(url)
@@ -741,13 +781,26 @@ impl Entry {
     /// * `parent_id` - New parent folder ID (for moving)
     /// * `new_name` - New name (for renaming)
     pub async fn patch(api_server: LFApiServer, auth: Auth, root_id: i64, parent_id: Option<i64>, new_name: Option<String>) -> Result<LFObject> {
+        // Validate inputs
+        let validated_id = validation::validate_entry_id(root_id)?;
+        let validated_parent_id = if let Some(pid) = parent_id {
+            Some(validation::validate_entry_id(pid)?)
+        } else {
+            None
+        };
+        let validated_name = if let Some(name) = &new_name {
+            Some(validation::validate_file_name(name)?)
+        } else {
+            None
+        };
+        
         let params = PatchedEntry {
-            parent_id: parent_id,
-            name: new_name,
+            parent_id: validated_parent_id,
+            name: validated_name.clone(),
         };   
 
         let request = reqwest::Client::new()
-        .patch(format!("https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}", api_server.address, api_server.repository, root_id))
+        .patch(format!("https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}", api_server.address, api_server.repository, validated_id))
         .header("Authorization", format!("Bearer {}", auth.access_token))
         .json(&params)
         .send().await;
@@ -781,9 +834,12 @@ impl Entry {
         auth: Auth,
         root_id: i64
     ) -> Result<EntriesOrError> {
+        // Validate entry ID
+        let validated_id = validation::validate_entry_id(root_id)?;
+        
         let url = format!(
             "{}/Laserfiche.Repository.Folder/children",
-            ApiHelper::build_entries_url(&api_server, root_id)
+            ApiHelper::build_entries_url(&api_server, validated_id)?
         );
         
         let response = reqwest::Client::new()
@@ -893,11 +949,20 @@ impl Entry {
         target_folder_id: i64,
         new_name: Option<String>
     ) -> Result<EntryOrError> {
+        // Validate inputs
+        let validated_id = validation::validate_entry_id(entry_id)?;
+        let validated_target_id = validation::validate_entry_id(target_folder_id)?;
+        let validated_name = if let Some(name) = &new_name {
+            Some(validation::validate_file_name(name)?)
+        } else {
+            None
+        };
+        
         let mut params = json!({
-            "targetId": target_folder_id
+            "targetId": validated_target_id
         });
         
-        if let Some(name) = new_name {
+        if let Some(name) = validated_name {
             params["name"] = json!(name);
         }
 
@@ -906,7 +971,7 @@ impl Entry {
                 "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/Copy",
                 api_server.address, 
                 api_server.repository, 
-                entry_id
+                validated_id
             ))
             .header("Authorization", format!("Bearer {}", auth.access_token))
             .json(&params)
@@ -937,12 +1002,15 @@ impl Entry {
         auth: Auth,
         entry_id: i64
     ) -> Result<TemplateOrError> {
+        // Validate entry ID
+        let validated_id = validation::validate_entry_id(entry_id)?;
+        
         let request = reqwest::Client::new()
             .get(format!(
                 "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/template",
                 api_server.address, 
                 api_server.repository, 
-                entry_id
+                validated_id
             ))
             .header("Authorization", format!("Bearer {}", auth.access_token))
             .send().await;
@@ -974,8 +1042,12 @@ impl Entry {
         entry_id: i64,
         template_name: String
     ) -> Result<EntryOrError> {
+        // Validate inputs
+        let validated_id = validation::validate_entry_id(entry_id)?;
+        let validated_template_name = validation::validate_field_name(&template_name)?;
+        
         let params = json!({
-            "templateName": template_name
+            "templateName": validated_template_name
         });
 
         let request = reqwest::Client::new()
@@ -983,7 +1055,7 @@ impl Entry {
                 "https://{}/LFRepositoryAPI/v1/Repositories/{}/Entries/{}/template",
                 api_server.address, 
                 api_server.repository, 
-                entry_id
+                validated_id
             ))
             .header("Authorization", format!("Bearer {}", auth.access_token))
             .json(&params)
